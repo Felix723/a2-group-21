@@ -144,6 +144,13 @@ class Circuit extends AST{
 	this.latches=latches;
 	this.updates=updates;
 	this.siminputs=siminputs;
+
+    this.simlength = this.siminputs.get(0).values.length;
+
+    this.simoutputs=new ArrayList<>();
+    for (String output : outputs) {
+        simoutputs.add(new Trace(output, new Boolean[simlength]));
+    }
     }
     public void initialize(Environment env){
         simlength =  siminputs.get(0).values.length;
@@ -155,8 +162,15 @@ class Circuit extends AST{
         }
         for (Update update: updates){
             update.eval(env);
+            if (outputs.contains(update.name)){
+                for (Trace outputTrace : simoutputs) {
+                    if (outputTrace.signal.equals(update.name))  {
+                        outputTrace.values[0] = env.getVariable(update.name);
+                        break;
+                    }
+                }
+            }
         }
-        System.out.println(env.toString());
     }
     public void nextCycle(Environment env, int time){
         for (int i = 0; i < inputs.size(); i++){
@@ -167,14 +181,27 @@ class Circuit extends AST{
         }
         for (Update update: updates){
             update.eval(env);
+            if (outputs.contains(update.name)){
+                for (Trace outputTrace : simoutputs) {
+                    if (outputTrace.signal.equals(update.name))  {
+                        outputTrace.values[time] = env.getVariable(update.name);
+                        break;
+                    }
+                }
+            }
         }
-        System.out.println(env.toString());
     }
     public void runSimulator(){
         Environment env = new Environment();
         initialize(env);
         for (int i = 1; i < simlength; i++){
             nextCycle(env,i);
+        }
+        for (Trace trace : siminputs){
+            System.out.println(trace + " " + trace.signal);
+        }
+        for (Trace trace : simoutputs){
+            System.out.println(trace + " " + trace.signal);
         }
     }
 }
