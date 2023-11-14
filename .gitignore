@@ -1,3 +1,5 @@
 *.class
 hw*
 *.html
+*.idea
+/out
