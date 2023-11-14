@@ -16,26 +16,40 @@ public abstract class AST{
    expressions with And (Conjunction), Or (Disjunction), and
    Not (Negation) */
 
-abstract class Expr extends AST{}
+abstract class Expr extends AST{
+    abstract public boolean eval(Environment env);
+}
 
 class Conjunction extends Expr{
     Expr e1,e2;
     Conjunction(Expr e1,Expr e2){this.e1=e1; this.e2=e2;}
+    public boolean eval(Environment env){
+        return e1.eval(env) && e2.eval(env);
+    }
 }
 
 class Disjunction extends Expr{
     Expr e1,e2;
     Disjunction(Expr e1,Expr e2){this.e1=e1; this.e2=e2;}
+    public boolean eval(Environment env){
+        return e1.eval(env) || e2.eval(env);
+    }
 }
 
 class Negation extends Expr{
     Expr e;
     Negation(Expr e){this.e=e;}
+    public boolean eval(Environment env){
+        return !e.eval(env);
+    }
 }
 
 class Signal extends Expr{
-    String varname; // a signal is just identified by a name 
+    String varname; // a signal is just identified by a name
     Signal(String varname){this.varname=varname;}
+    public boolean eval(Environment env){
+        return env.getVariable(varname);
+    }
 }
 
 // Latches have an input and output signal
@@ -47,6 +61,12 @@ class Latch extends AST{
 	this.inputname=inputname;
 	this.outputname=outputname;
     }
+    public void initialize(Environment env){
+        env.setVariable(outputname,false);
+    }
+    public void nextCycle(Environment env){
+        env.setVariable(outputname,env.getVariable(inputname));
+    }
 }
 
 // An Update is any of the lines " signal = expression "
@@ -56,6 +76,9 @@ class Update extends AST{
     String name;
     Expr e;
     Update(String name, Expr e){this.e=e; this.name=name;}
+    public void eval(Environment env){
+        env.setVariable(name, e.eval(env));
+    }
 }
 
 /* A Trace is a signal and an array of Booleans, for instance each
@@ -71,6 +94,13 @@ class Trace extends AST{
     Trace(String signal, Boolean[] values){
 	this.signal=signal;
 	this.values=values;
+    }
+    public String toString(){
+        String result = "";
+        for (Boolean value : values) {
+            result += value ? "1" : "0";
+        }
+        return result;
     }
 }
 
@@ -114,5 +144,37 @@ class Circuit extends AST{
 	this.latches=latches;
 	this.updates=updates;
 	this.siminputs=siminputs;
+    }
+    public void initialize(Environment env){
+        simlength =  siminputs.get(0).values.length;
+        for (int i = 0; i < inputs.size(); i++){
+            env.setVariable(inputs.get(i),siminputs.get(i).values[0]);
+        }
+        for (Latch latch : latches) {
+            latch.initialize(env);
+        }
+        for (Update update: updates){
+            update.eval(env);
+        }
+        System.out.println(env.toString());
+    }
+    public void nextCycle(Environment env, int time){
+        for (int i = 0; i < inputs.size(); i++){
+            env.setVariable(inputs.get(i),siminputs.get(i).values[time]);
+        }
+        for (Latch latch : latches) {
+            latch.nextCycle(env);
+        }
+        for (Update update: updates){
+            update.eval(env);
+        }
+        System.out.println(env.toString());
+    }
+    public void runSimulator(){
+        Environment env = new Environment();
+        initialize(env);
+        for (int i = 1; i < simlength; i++){
+            nextCycle(env,i);
+        }
     }
 }
