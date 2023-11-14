@@ -1,12 +1,11 @@
 import java.util.HashMap;
-import java.util.Map.Entry;
 import java.util.List;
 import java.util.ArrayList;
 
-public abstract class AST{
-    public void error(String msg){
-	System.err.println(msg);
-	System.exit(-1);
+public abstract class AST {
+    public void error(String msg) {
+        System.err.println(msg);
+        System.exit(-1);
     }
 };
 
@@ -16,67 +15,93 @@ public abstract class AST{
    expressions with And (Conjunction), Or (Disjunction), and
    Not (Negation) */
 
-abstract class Expr extends AST{
+abstract class Expr extends AST {
     abstract public boolean eval(Environment env);
 }
 
-class Conjunction extends Expr{
-    Expr e1,e2;
-    Conjunction(Expr e1,Expr e2){this.e1=e1; this.e2=e2;}
-    public boolean eval(Environment env){
+class Conjunction extends Expr {
+    Expr e1, e2;
+
+    Conjunction(Expr e1, Expr e2) {
+        this.e1 = e1;
+        this.e2 = e2;
+    }
+
+    public boolean eval(Environment env) {
         return e1.eval(env) && e2.eval(env);
     }
 }
 
-class Disjunction extends Expr{
-    Expr e1,e2;
-    Disjunction(Expr e1,Expr e2){this.e1=e1; this.e2=e2;}
-    public boolean eval(Environment env){
+class Disjunction extends Expr {
+    Expr e1, e2;
+
+    Disjunction(Expr e1, Expr e2) {
+        this.e1 = e1;
+        this.e2 = e2;
+    }
+
+    public boolean eval(Environment env) {
         return e1.eval(env) || e2.eval(env);
     }
 }
 
-class Negation extends Expr{
+class Negation extends Expr {
     Expr e;
-    Negation(Expr e){this.e=e;}
-    public boolean eval(Environment env){
+
+    Negation(Expr e) {
+        this.e = e;
+    }
+
+    public boolean eval(Environment env) {
         return !e.eval(env);
     }
 }
 
-class Signal extends Expr{
+class Signal extends Expr {
     String varname; // a signal is just identified by a name
-    Signal(String varname){this.varname=varname;}
-    public boolean eval(Environment env){
+
+    Signal(String varname) {
+        this.varname = varname;
+    }
+
+    public boolean eval(Environment env) {
         return env.getVariable(varname);
     }
 }
 
 // Latches have an input and output signal
 
-class Latch extends AST{
+class Latch extends AST {
     String inputname;
     String outputname;
-    Latch(String inputname, String outputname){
-	this.inputname=inputname;
-	this.outputname=outputname;
+
+    Latch(String inputname, String outputname) {
+        this.inputname = inputname;
+        this.outputname = outputname;
     }
-    public void initialize(Environment env){
-        env.setVariable(outputname,false);
+
+    public void initialize(Environment env) {
+        env.setVariable(outputname, false);
     }
-    public void nextCycle(Environment env){
-        env.setVariable(outputname,env.getVariable(inputname));
+
+    public void nextCycle(Environment env) {
+        env.setVariable(outputname, env.getVariable(inputname));
     }
 }
 
 // An Update is any of the lines " signal = expression "
 // in the .update section
 
-class Update extends AST{
+class Update extends AST {
     String name;
     Expr e;
-    Update(String name, Expr e){this.e=e; this.name=name;}
-    public void eval(Environment env){
+
+    Update(String name, Expr e) {
+        this.e = e;
+        this.name = name;
+    }
+
+    public void eval(Environment env) {
         env.setVariable(name, e.eval(env));
     }
 }
@@ -88,14 +113,16 @@ class Update extends AST{
    assignment.
 */
 
-class Trace extends AST{
+class Trace extends AST {
     String signal;
     Boolean[] values;
-    Trace(String signal, Boolean[] values){
-	this.signal=signal;
-	this.values=values;
+
+    Trace(String signal, Boolean[] values) {
+        this.signal = signal;
+        this.values = values;
     }
-    public String toString(){
+
+    public String toString() {
         String result = "";
         for (Boolean value : values) {
             result += value ? "1" : "0";
@@ -123,84 +150,80 @@ class Trace extends AST{
    should also finally have the length simlength.
 */
 
-class Circuit extends AST{
-    String name; 
-    List<String> inputs;
-    List<String> outputs;
-    List<Latch>  latches;
+class Circuit extends AST {
+    String name;
+    List<String> inputNames;
+    List<String> outputNames;
+    List<Latch> latches;
     List<Update> updates;
-    List<Trace>  siminputs;
-    List<Trace>  simoutputs;
-    int simlength;
+    List<Trace> simInputs;
+    HashMap<String, Trace> simOutputs;
+    int simLength;
+
     Circuit(String name,
-	    List<String> inputs,
-	    List<String> outputs,
-	    List<Latch>  latches,
-	    List<Update> updates,
-	    List<Trace>  siminputs){
-	this.name=name;
-	this.inputs=inputs;
-	this.outputs=outputs;
-	this.latches=latches;
-	this.updates=updates;
-	this.siminputs=siminputs;
+            List<String> inputNames,
+            List<String> outputNames,
+            List<Latch> latches,
+            List<Update> updates,
+            List<Trace> simInputs) {
+        this.name = name;
+        this.inputNames = inputNames;
+        this.outputNames = outputNames;
+        this.latches = latches;
+        this.updates = updates;
+        this.simInputs = simInputs;
 
-    this.simlength = this.siminputs.get(0).values.length;
+        this.simLength = this.simInputs.get(0).values.length;
 
-    this.simoutputs=new ArrayList<>();
-    for (String output : outputs) {
-        simoutputs.add(new Trace(output, new Boolean[simlength]));
+        this.simOutputs = new HashMap<>();
+        for (String outputName : outputNames) {
+            simOutputs.put(outputName, new Trace(outputName, new Boolean[simLength]));
+        }
     }
-    }
-    public void initialize(Environment env){
-        simlength =  siminputs.get(0).values.length;
-        for (int i = 0; i < inputs.size(); i++){
-            env.setVariable(inputs.get(i),siminputs.get(i).values[0]);
+
+    public void initialize(Environment env) {
+        simLength = simInputs.get(0).values.length;
+        for (int i = 0; i < inputNames.size(); i++) {
+            env.setVariable(inputNames.get(i), simInputs.get(i).values[0]);
         }
         for (Latch latch : latches) {
             latch.initialize(env);
         }
-        for (Update update: updates){
-            update.eval(env);
-            if (outputs.contains(update.name)){
-                for (Trace outputTrace : simoutputs) {
-                    if (outputTrace.signal.equals(update.name))  {
-                        outputTrace.values[0] = env.getVariable(update.name);
-                        break;
-                    }
-                }
-            }
-        }
+
+        performUpdates(env, 0);
     }
-    public void nextCycle(Environment env, int time){
-        for (int i = 0; i < inputs.size(); i++){
-            env.setVariable(inputs.get(i),siminputs.get(i).values[time]);
+
+    public void nextCycle(Environment env, int time) {
+        for (int i = 0; i < inputNames.size(); i++) {
+            env.setVariable(inputNames.get(i), simInputs.get(i).values[time]);
         }
         for (Latch latch : latches) {
             latch.nextCycle(env);
         }
-        for (Update update: updates){
+
+        performUpdates(env, time);
+    }
+
+    private void performUpdates(Environment env, int time) {
+        for (Update update : updates) {
             update.eval(env);
-            if (outputs.contains(update.name)){
-                for (Trace outputTrace : simoutputs) {
-                    if (outputTrace.signal.equals(update.name))  {
-                        outputTrace.values[time] = env.getVariable(update.name);
-                        break;
-                    }
-                }
+
+            if (outputNames.contains(update.name)) {
+                simOutputs.get(update.name).values[time] = env.getVariable(update.name);
             }
         }
     }
-    public void runSimulator(){
+
+    public void runSimulator() {
         Environment env = new Environment();
         initialize(env);
-        for (int i = 1; i < simlength; i++){
-            nextCycle(env,i);
+        for (int i = 1; i < simLength; i++) {
+            nextCycle(env, i);
         }
-        for (Trace trace : siminputs){
+        for (Trace trace : simInputs) {
             System.out.println(trace + " " + trace.signal);
         }
-        for (Trace trace : simoutputs){
+        for (Trace trace : simOutputs.values()) {
             System.out.println(trace + " " + trace.signal);
         }
     }
