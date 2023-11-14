@@ -1,6 +1,4 @@
-import java.util.HashMap;
-import java.util.List;
-import java.util.ArrayList;
+import java.util.*;
 
 public abstract class AST {
     public void error(String msg) {
@@ -17,6 +15,16 @@ public abstract class AST {
 
 abstract class Expr extends AST {
     abstract public boolean eval(Environment env);
+
+    abstract public String[] getDependentVariableNames();
+
+    protected String[] getDependentVariableNames(Expr... expressions) {
+        ArrayList<String> dependentVariables = new ArrayList<>();
+        for (Expr expression : expressions) {
+            dependentVariables.addAll(Arrays.asList(expression.getDependentVariableNames()));
+        }
+        return dependentVariables.toArray(new String[0]);
+    }
 }
 
 class Conjunction extends Expr {
@@ -29,6 +37,11 @@ class Conjunction extends Expr {
 
     public boolean eval(Environment env) {
         return e1.eval(env) && e2.eval(env);
+    }
+
+    @Override
+    public String[] getDependentVariableNames() {
+        return getDependentVariableNames(e1, e2);
     }
 }
 
@@ -43,6 +56,11 @@ class Disjunction extends Expr {
     public boolean eval(Environment env) {
         return e1.eval(env) || e2.eval(env);
     }
+
+    @Override
+    public String[] getDependentVariableNames() {
+        return getDependentVariableNames(e1, e2);
+    }
 }
 
 class Negation extends Expr {
@@ -55,6 +73,11 @@ class Negation extends Expr {
     public boolean eval(Environment env) {
         return !e.eval(env);
     }
+
+    @Override
+    public String[] getDependentVariableNames() {
+        return e.getDependentVariableNames();
+    }
 }
 
 class Signal extends Expr {
@@ -65,7 +88,17 @@ class Signal extends Expr {
     }
 
     public boolean eval(Environment env) {
+        if (!env.hasVariable(varname)) {
+            error("Variable not defined: " + varname);
+        }
         return env.getVariable(varname);
+    }
+
+    @Override
+    public String[] getDependentVariableNames() {
+        String[] subExpressionName = new String[1];
+        subExpressionName[0] = varname;
+        return subExpressionName;
     }
 }
 
@@ -116,18 +149,32 @@ class Update extends AST {
 class Trace extends AST {
     String signal;
     Boolean[] values;
+    int length;
 
     Trace(String signal, Boolean[] values) {
         this.signal = signal;
         this.values = values;
+        this.length = values.length;
+    }
+
+    Trace(String signal, int valueCount) {
+        this(signal, new Boolean[valueCount]);
     }
 
     public String toString() {
-        String result = "";
+        StringBuilder result = new StringBuilder();
         for (Boolean value : values) {
-            result += value ? "1" : "0";
+            result.append(value ? "1" : "0");
         }
-        return result;
+        return result + " " + signal;
+    }
+
+    public void setValue(boolean value, int time) {
+        values[time] = value;
+    }
+
+    public boolean getValue(int time) {
+        return values[time];
     }
 }
 
@@ -155,76 +202,115 @@ class Circuit extends AST {
     List<String> inputNames;
     List<String> outputNames;
     List<Latch> latches;
+    List<String> latchOutputNames;
     List<Update> updates;
-    List<Trace> simInputs;
-    HashMap<String, Trace> simOutputs;
+    List<String> updateNames;
+    List<Trace> inputTraces;
+    HashMap<String, Trace> outputNameToTrace;
     int simLength;
+
+    List<String> legalUpdateVariables;
+
+    Environment env;
 
     Circuit(String name,
             List<String> inputNames,
             List<String> outputNames,
             List<Latch> latches,
             List<Update> updates,
-            List<Trace> simInputs) {
+            List<Trace> inputTraces) {
         this.name = name;
         this.inputNames = inputNames;
         this.outputNames = outputNames;
         this.latches = latches;
         this.updates = updates;
-        this.simInputs = simInputs;
+        this.updateNames = new ArrayList<>();
+        updates.forEach(update -> updateNames.add(update.name));
+        this.inputTraces = inputTraces;
+        this.latchOutputNames = new ArrayList<>();
+        latches.forEach(latch -> latchOutputNames.add(latch.outputname));
+        this.legalUpdateVariables = new ArrayList<>();
+        legalUpdateVariables.addAll(inputNames);
+        legalUpdateVariables.addAll(latchOutputNames);
 
-        this.simLength = this.simInputs.get(0).values.length;
+        this.simLength = this.inputTraces.get(0).length;
+        for (int i = 1; i < inputTraces.size(); i++) {
+            if (inputTraces.get(i).length != simLength) {
+                error("All inputs must be same length");
+            }
+        }
 
-        this.simOutputs = new HashMap<>();
+        HashSet<String> uniqueSignalNames = new HashSet<>();
+        uniqueSignalNames.addAll(inputNames);
+        uniqueSignalNames.addAll(latchOutputNames);
+        uniqueSignalNames.addAll(updateNames);
+
+        if (uniqueSignalNames.size() != (inputNames.size() + latches.size() + updates.size())) {
+            error("A signal must be precisely 1 of the following:\n- Input signal\n- Output of a latch\n- Output of an update");
+        }
+
+        this.outputNameToTrace = new HashMap<>();
         for (String outputName : outputNames) {
-            simOutputs.put(outputName, new Trace(outputName, new Boolean[simLength]));
+            outputNameToTrace.put(outputName, new Trace(outputName, simLength));
         }
     }
 
-    public void initialize(Environment env) {
-        simLength = simInputs.get(0).values.length;
-        for (int i = 0; i < inputNames.size(); i++) {
-            env.setVariable(inputNames.get(i), simInputs.get(i).values[0]);
-        }
+    public void initialize() {
+        updateInputs(0);
         for (Latch latch : latches) {
             latch.initialize(env);
         }
 
-        performUpdates(env, 0);
+        performUpdates(0);
     }
 
-    public void nextCycle(Environment env, int time) {
-        for (int i = 0; i < inputNames.size(); i++) {
-            env.setVariable(inputNames.get(i), simInputs.get(i).values[time]);
-        }
+    public void nextCycle(int time) {
+        updateInputs(time);
         for (Latch latch : latches) {
             latch.nextCycle(env);
         }
 
-        performUpdates(env, time);
+        performUpdates(time);
     }
 
-    private void performUpdates(Environment env, int time) {
+    private void performUpdates(int time) {
+        HashSet<String> legalVariables = new HashSet<>(this.legalUpdateVariables);
+
         for (Update update : updates) {
+            String[] rightHandNames = update.e.getDependentVariableNames();
+            if (!legalVariables.containsAll(Arrays.stream(rightHandNames).toList())) {
+                error("Variable " + update.name + " may be cyclical");
+            }
             update.eval(env);
 
-            if (outputNames.contains(update.name)) {
-                simOutputs.get(update.name).values[time] = env.getVariable(update.name);
+            String name = update.name;
+            if (outputNames.contains(name)) {
+                boolean newValue = env.getVariable(name);
+                outputNameToTrace.get(name).setValue(newValue, time);
             }
+
+            legalVariables.add(update.name);
+        }
+    }
+
+    private void updateInputs(int time) {
+        for (int i = 0; i < inputNames.size(); i++) {
+            String inputName = inputNames.get(i);
+            Trace inputTrace = inputTraces.get(i);
+
+            env.setVariable(inputName, inputTrace.getValue(time));
         }
     }
 
     public void runSimulator() {
-        Environment env = new Environment();
-        initialize(env);
+        env = new Environment();
+
+        initialize();
         for (int i = 1; i < simLength; i++) {
-            nextCycle(env, i);
+            nextCycle(i);
         }
-        for (Trace trace : simInputs) {
-            System.out.println(trace + " " + trace.signal);
-        }
-        for (Trace trace : simOutputs.values()) {
-            System.out.println(trace + " " + trace.signal);
-        }
+
+        inputTraces.forEach(System.out::println);
+        outputNameToTrace.values().forEach(System.out::println);
     }
 }
