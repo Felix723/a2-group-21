@@ -234,6 +234,9 @@ class Circuit extends AST {
         legalUpdateVariables.addAll(latchOutputNames);
 
         this.simLength = this.inputTraces.get(0).length;
+        if(simLength == 0){
+            error("No input can be empty");
+        }
         for (int i = 1; i < inputTraces.size(); i++) {
             if (inputTraces.get(i).length != simLength) {
                 error("All inputs must be same length");
